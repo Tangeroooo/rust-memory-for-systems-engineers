@@ -1,0 +1,21 @@
+[book]
+title = "시스템 엔지니어를 위한 Rust 메모리 관리"
+authors = ["Tangeroooo"]
+language = "ko"
+src = "src"
+description = "C/C++ 시스템 개발자를 위한 ownership부터 OOM까지의 Rust 메모리 관리 교재"
+
+[build]
+build-dir = "book"
+create-missing = false
+
+[rust]
+edition = "2024"
+
+[output.html]
+default-theme = "rust"
+preferred-dark-theme = "ayu"
+git-repository-url = "https://github.com/Tangeroooo/rust-memory-for-systems-engineers"
+edit-url-template = "https://github.com/Tangeroooo/rust-memory-for-systems-engineers/edit/main/{path}"
+site-url = "/rust-memory-for-systems-engineers/"
+additional-css = ["theme/memory.css"]

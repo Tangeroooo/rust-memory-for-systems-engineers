@@ -1,0 +1,40 @@
+:root {
+  --content-max-width: 880px;
+}
+
+.content main {
+  line-height: 1.75;
+}
+
+.content table {
+  font-size: 0.93em;
+}
+
+.content blockquote {
+  border-inline-start: 4px solid var(--sidebar-active);
+  background: color-mix(in srgb, var(--sidebar-bg) 72%, transparent);
+  padding: 0.8rem 1rem;
+}
+
+.content code {
+  word-break: normal;
+}
+
+.memory-diagram {
+  display: block;
+  width: 100%;
+  border: 1px solid color-mix(in srgb, var(--fg) 22%, transparent);
+  border-radius: 0.75rem;
+  background: #fafaf7;
+}
+
+.memory-diagram--wide {
+  aspect-ratio: 16 / 9;
+  min-height: 32rem;
+}
+
+@media (max-width: 720px) {
+  .memory-diagram--wide {
+    min-height: 24rem;
+  }
+}

@@ -1,0 +1,3 @@
+[workspace]
+members = ["examples/memory-lab"]
+resolver = "3"

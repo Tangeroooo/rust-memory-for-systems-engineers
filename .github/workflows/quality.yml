@@ -1,0 +1,26 @@
+name: Quality
+
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install mdBook
+        run: cargo install mdbook --version 0.5.4 --locked
+      - name: Check book structure
+        run: python3 scripts/check-book.py
+      - name: Test examples
+        run: cargo test --workspace --all-targets
+      - name: Test Rust snippets
+        run: mdbook test
+      - name: Build book
+        run: mdbook build

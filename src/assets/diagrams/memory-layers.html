@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rust memory management의 일곱 계층</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Alfa+Slab+One&family=Fira+Sans:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;600;700&family=Source+Code+Pro:wght@500;600&display=swap');
+    :root {
+      --paper: #fafaf7;
+      --ink: #2a3439;
+      --muted: #59656a;
+      --surface: #ffffff;
+      --zone: #f0f1ef;
+      --border: #b8c0c3;
+      --rust-red: #a72145;
+      --rust-red-soft: #f5e8eb;
+      --rust-yellow: #ffc832;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background: var(--paper); }
+    body { font-family: "Fira Sans", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; color: var(--ink); }
+    .frame { width: 100%; max-width: 1280px; margin: 0 auto; }
+    svg { display: block; width: 100%; height: auto; background: var(--paper); }
+    .eyebrow { font-family: "Alfa Slab One", serif; font-size: 16px; letter-spacing: 2px; fill: var(--rust-red); }
+    .title { font-size: 32px; font-weight: 700; fill: var(--ink); }
+    .subtitle { font-size: 16px; font-weight: 400; fill: var(--muted); }
+    .zone-label { font-size: 14px; font-weight: 700; letter-spacing: 1px; fill: var(--muted); }
+    .node-title { font-size: 18px; font-weight: 700; fill: var(--ink); }
+    .node-copy { font-size: 14px; font-weight: 500; fill: var(--muted); }
+    .node-keyword { font-family: "Source Code Pro", "Noto Sans KR", monospace; font-size: 13px; font-weight: 600; fill: var(--muted); }
+    .inverse { fill: #ffffff; }
+    .accent-copy { fill: #f8dfe6; }
+    .edge-label { font-size: 13px; font-weight: 600; fill: var(--muted); }
+    .legend { font-size: 13px; font-weight: 500; fill: var(--muted); }
+  </style>
+</head>
+<body>
+  <main class="frame">
+    <svg viewBox="0 0 1280 720" role="img" aria-labelledby="memory-layers-title memory-layers-desc">
+      <title id="memory-layers-title">Rust memory management의 일곱 계층</title>
+      <desc id="memory-layers-desc">Language에서 Server와 Database Governance까지 이어지는 일곱 계층이다. 위 행은 Rust program 안의 의미와 allocation, 아래 행은 operating system과 운영 policy를 나타낸다.</desc>
+      <defs>
+        <marker id="memory-layers-arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+          <path d="M 1 1 L 11 6 L 1 11 z" fill="#2a3439"/>
+        </marker>
+      </defs>
+
+      <rect x="0" y="0" width="1280" height="720" fill="#fafaf7"/>
+      <text x="48" y="48" class="eyebrow">RUST MEMORY MODEL</text>
+      <text x="48" y="88" class="title">Language에서 운영 정책까지</text>
+      <text x="48" y="116" class="subtitle">각 계층의 보장은 다음 계층의 결과를 자동으로 보장하지 않는다.</text>
+
+      <rect x="48" y="152" width="1184" height="176" rx="16" fill="#f0f1ef" stroke="#b8c0c3" stroke-width="2"/>
+      <rect x="48" y="408" width="1184" height="176" rx="16" fill="#f0f1ef" stroke="#b8c0c3" stroke-width="2"/>
+      <text x="72" y="180" class="zone-label">PROGRAM SEMANTICS &amp; ALLOCATION</text>
+      <text x="72" y="436" class="zone-label">HOST RESOURCE &amp; OPERATION POLICY</text>
+
+      <g fill="none" stroke="#2a3439" stroke-width="2" marker-end="url(#memory-layers-arrow)">
+        <path d="M 288 256 H 368"/>
+        <path d="M 576 256 H 656"/>
+        <path d="M 864 256 H 944"/>
+        <path d="M 1048 300 V 364 H 264 V 448"/>
+        <path d="M 368 492 H 536"/>
+        <path d="M 744 492 H 912"/>
+      </g>
+
+      <rect x="520" y="348" width="160" height="28" rx="8" fill="#fafaf7"/>
+      <text x="600" y="368" text-anchor="middle" class="edge-label">runtime / OS 경계</text>
+
+      <g>
+        <rect x="80" y="212" width="208" height="88" rx="12" fill="#a72145" stroke="#a72145" stroke-width="2"/>
+        <text x="104" y="244" class="node-title inverse">1 · Language</text>
+        <text x="104" y="272" class="node-keyword accent-copy">ownership · borrowing</text>
+        <text x="104" y="292" class="node-keyword accent-copy">lifetime · move</text>
+      </g>
+
+      <g>
+        <rect x="368" y="212" width="208" height="88" rx="12" fill="#ffffff" stroke="#b8c0c3" stroke-width="2"/>
+        <text x="392" y="244" class="node-title">2 · Object lifetime</text>
+        <text x="392" y="272" class="node-keyword">scope · Drop · RAII</text>
+        <text x="392" y="292" class="node-copy">destructor 실행</text>
+      </g>
+
+      <g>
+        <rect x="656" y="212" width="208" height="88" rx="12" fill="#ffffff" stroke="#b8c0c3" stroke-width="2"/>
+        <text x="680" y="244" class="node-title">3 · Collections / Heap</text>
+        <text x="680" y="272" class="node-keyword">Box · Vec · Arc</text>
+        <text x="680" y="292" class="node-copy">length와 capacity</text>
+      </g>
+
+      <g>
+        <rect x="944" y="212" width="208" height="88" rx="12" fill="#ffffff" stroke="#b8c0c3" stroke-width="2"/>
+        <text x="968" y="244" class="node-title">4 · Allocator</text>
+        <text x="968" y="272" class="node-keyword">allocate · deallocate</text>
+        <text x="968" y="292" class="node-copy">fragmentation · retention</text>
+      </g>
+
+      <g>
+        <rect x="160" y="448" width="208" height="88" rx="12" fill="#ffffff" stroke="#b8c0c3" stroke-width="2"/>
+        <text x="184" y="480" class="node-title">5 · OS VM / RSS</text>
+        <text x="184" y="508" class="node-keyword">mapping · page fault</text>
+        <text x="184" y="528" class="node-copy">resident page와 overcommit</text>
+      </g>
+
+      <g>
+        <rect x="536" y="448" width="208" height="88" rx="12" fill="#ffffff" stroke="#b8c0c3" stroke-width="2"/>
+        <text x="560" y="480" class="node-title">6 · Resource control</text>
+        <text x="560" y="508" class="node-keyword">cgroup · reclaim · OOM</text>
+        <text x="560" y="528" class="node-copy">host와 container의 경계</text>
+      </g>
+
+      <g>
+        <rect x="912" y="448" width="208" height="88" rx="12" fill="#ffc832" stroke="#2a3439" stroke-width="2"/>
+        <text x="936" y="480" class="node-title">7 · Server / DB</text>
+        <text x="936" y="508" class="node-keyword">budget · admission</text>
+        <text x="936" y="528" class="node-copy">spill · eviction · backpressure</text>
+      </g>
+
+      <rect x="48" y="624" width="1184" height="56" rx="12" fill="#ffffff" stroke="#b8c0c3" stroke-width="2"/>
+      <circle cx="80" cy="652" r="8" fill="#a72145"/>
+      <text x="100" y="657" class="legend">Rust language가 강하게 보장하는 출발점</text>
+      <circle cx="432" cy="652" r="8" fill="#ffc832" stroke="#2a3439" stroke-width="2"/>
+      <text x="452" y="657" class="legend">application이 별도로 설계해야 하는 운영 정책</text>
+      <text x="1200" y="657" text-anchor="end" class="legend">deallocation ≠ RSS 감소</text>
+    </svg>
+  </main>
+</body>
+</html>

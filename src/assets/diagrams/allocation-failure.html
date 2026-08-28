@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Application budget에서 cgroup OOM까지</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Alfa+Slab+One&family=Fira+Sans:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;600;700&family=Source+Code+Pro:wght@500;600&display=swap');
+    :root {
+      --paper: #fafaf7;
+      --ink: #2a3439;
+      --muted: #59656a;
+      --surface: #ffffff;
+      --border: #b8c0c3;
+      --rust-red: #a72145;
+      --rust-red-soft: #f5e8eb;
+      --rust-yellow: #ffc832;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background: var(--paper); }
+    body { font-family: "Fira Sans", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; color: var(--ink); }
+    .frame { width: 100%; max-width: 1280px; margin: 0 auto; }
+    svg { display: block; width: 100%; height: auto; background: var(--paper); }
+    .eyebrow { font-family: "Alfa Slab One", serif; font-size: 16px; letter-spacing: 2px; fill: var(--rust-red); }
+    .title { font-size: 32px; font-weight: 700; fill: var(--ink); }
+    .subtitle { font-size: 16px; font-weight: 400; fill: var(--muted); }
+    .node-title { font-size: 18px; font-weight: 700; fill: var(--ink); }
+    .node-copy { font-size: 14px; font-weight: 500; fill: var(--muted); }
+    .keyword { font-family: "Source Code Pro", "Noto Sans KR", monospace; font-size: 14px; font-weight: 600; fill: var(--ink); }
+    .inverse { fill: #ffffff; }
+    .inverse-copy { fill: #f8dfe6; }
+    .branch { font-size: 13px; font-weight: 700; fill: var(--muted); }
+    .note { font-size: 13px; font-weight: 500; fill: var(--muted); }
+  </style>
+</head>
+<body>
+  <main class="frame">
+    <svg viewBox="0 0 1280 720" role="img" aria-labelledby="allocation-flow-title allocation-flow-desc">
+      <title id="allocation-flow-title">Application budget에서 cgroup OOM까지</title>
+      <desc id="allocation-flow-desc">Application의 admission 결정, try_reserve 결과, 실제 page touch, cgroup hard limit을 순서대로 구분한다. API allocation 성공은 physical memory 확보를 보장하지 않는다.</desc>
+      <defs>
+        <marker id="allocation-flow-arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+          <path d="M 1 1 L 11 6 L 1 11 z" fill="#2a3439"/>
+        </marker>
+      </defs>
+
+      <rect x="0" y="0" width="1280" height="720" fill="#fafaf7"/>
+      <text x="48" y="48" class="eyebrow">ALLOCATION FAILURE PATHS</text>
+      <text x="48" y="88" class="title">`try_reserve` 성공은 memory admission이 아니다</text>
+      <text x="48" y="116" class="subtitle">서로 다른 세 결정 지점을 분리해야 failure를 예측하고 관측할 수 있다.</text>
+
+      <g fill="none" stroke="#2a3439" stroke-width="2" marker-end="url(#allocation-flow-arrow)">
+        <path d="M 640 204 V 236"/>
+        <path d="M 536 156 H 392"/>
+        <path d="M 640 300 V 324"/>
+        <path d="M 536 372 H 392"/>
+        <path d="M 640 420 V 452"/>
+        <path d="M 640 516 V 536"/>
+        <path d="M 536 592 H 392"/>
+        <path d="M 744 592 H 888"/>
+      </g>
+
+      <g>
+        <rect x="416" y="136" width="72" height="28" rx="8" fill="#fafaf7"/>
+        <text x="452" y="156" text-anchor="middle" class="branch">거절</text>
+        <rect x="652" y="208" width="64" height="28" rx="8" fill="#fafaf7"/>
+        <text x="684" y="228" text-anchor="middle" class="branch">승인</text>
+        <rect x="416" y="352" width="72" height="28" rx="8" fill="#fafaf7"/>
+        <text x="452" y="372" text-anchor="middle" class="branch">실패</text>
+        <rect x="652" y="424" width="64" height="28" rx="8" fill="#fafaf7"/>
+        <text x="684" y="444" text-anchor="middle" class="branch">성공</text>
+        <rect x="416" y="572" width="72" height="28" rx="8" fill="#fafaf7"/>
+        <text x="452" y="592" text-anchor="middle" class="branch">초과</text>
+        <rect x="792" y="572" width="64" height="28" rx="8" fill="#fafaf7"/>
+        <text x="824" y="592" text-anchor="middle" class="branch">여유</text>
+      </g>
+
+      <g>
+        <path d="M 640 108 L 744 156 L 640 204 L 536 156 Z" fill="#f5e8eb" stroke="#a72145" stroke-width="2"/>
+        <text x="640" y="148" text-anchor="middle" class="node-title">Application budget</text>
+        <text x="640" y="172" text-anchor="middle" class="node-copy">admission 허용?</text>
+      </g>
+
+      <g>
+        <rect x="112" y="124" width="280" height="64" rx="32" fill="#ffffff" stroke="#b8c0c3" stroke-width="2"/>
+        <text x="252" y="151" text-anchor="middle" class="node-title">wait / reject</text>
+        <text x="252" y="174" text-anchor="middle" class="node-copy">작업을 시작하지 않음</text>
+      </g>
+
+      <g>
+        <rect x="496" y="236" width="288" height="64" rx="12" fill="#ffc832" stroke="#2a3439" stroke-width="2"/>
+        <text x="640" y="264" text-anchor="middle" class="keyword">Vec::try_reserve</text>
+        <text x="640" y="287" text-anchor="middle" class="node-copy">collection capacity 요청</text>
+      </g>
+
+      <g>
+        <path d="M 640 324 L 744 372 L 640 420 L 536 372 Z" fill="#ffffff" stroke="#b8c0c3" stroke-width="2"/>
+        <text x="640" y="364" text-anchor="middle" class="node-title">API allocation</text>
+        <text x="640" y="388" text-anchor="middle" class="node-copy">성공?</text>
+      </g>
+
+      <g>
+        <rect x="112" y="340" width="280" height="64" rx="32" fill="#ffffff" stroke="#b8c0c3" stroke-width="2"/>
+        <text x="252" y="367" text-anchor="middle" class="node-title">task-level error</text>
+        <text x="252" y="390" text-anchor="middle" class="node-copy">reservation 해제 · error 전파</text>
+      </g>
+
+      <g>
+        <rect x="496" y="452" width="288" height="64" rx="12" fill="#ffffff" stroke="#b8c0c3" stroke-width="2"/>
+        <text x="640" y="480" text-anchor="middle" class="node-title">page 실제 touch</text>
+        <text x="640" y="503" text-anchor="middle" class="node-copy">page fault · reclaim · memory charge</text>
+      </g>
+
+      <g>
+        <path d="M 640 536 L 744 592 L 640 648 L 536 592 Z" fill="#f5e8eb" stroke="#a72145" stroke-width="2"/>
+        <text x="640" y="584" text-anchor="middle" class="node-title">physical / cgroup</text>
+        <text x="640" y="608" text-anchor="middle" class="node-copy">hard limit 안인가?</text>
+      </g>
+
+      <g>
+        <rect x="112" y="560" width="280" height="64" rx="32" fill="#a72145" stroke="#a72145" stroke-width="2"/>
+        <text x="252" y="587" text-anchor="middle" class="node-title inverse">global / cgroup OOM</text>
+        <text x="252" y="610" text-anchor="middle" class="node-copy inverse-copy">kernel victim 선택 가능</text>
+      </g>
+
+      <g>
+        <rect x="888" y="560" width="280" height="64" rx="32" fill="#ffffff" stroke="#b8c0c3" stroke-width="2"/>
+        <text x="1028" y="587" text-anchor="middle" class="node-title">작업 실행 계속</text>
+        <text x="1028" y="610" text-anchor="middle" class="node-copy">RSS와 pressure는 계속 관측</text>
+      </g>
+
+      <rect x="48" y="668" width="1184" height="36" rx="8" fill="#ffffff" stroke="#b8c0c3" stroke-width="2"/>
+      <text x="640" y="692" text-anchor="middle" class="note">API success는 virtual address/capacity 관점의 결과이며, 미래의 resident memory나 cgroup 생존을 보장하지 않는다.</text>
+    </svg>
+  </main>
+</body>
+</html>

@@ -100,6 +100,22 @@ mdbook build
 
 생성된 사이트는 `book/index.html`에서 확인할 수 있다. `main`에 push하면 GitHub Actions가 같은 검증을 수행한 뒤 GitHub Pages에 배포한다.
 
+## 실전 예제
+
+`examples/memory-lab`에는 다음 실행·검증 가능한 예제가 있다.
+
+- concurrent request admission과 reservation RAII
+- budget 부족 시 task ownership을 돌려주는 backpressure 경계
+- `BudgetedBuffer`의 grow-before-allocate와 grant rollback
+- Linux에서 `Vec` heap, direct `MAP_ANONYMOUS`, thread stack이 allocator counter와 `RssAnon`에 다르게 나타나는 실험
+
+```bash
+cargo test --workspace --all-targets
+
+# Linux 전용 관측 실험
+cargo run -p memory-lab --bin linux_anonymous
+```
+
 ## Git identity 안전장치
 
 이 저장소의 commit과 push는 개인 identity만 허용한다.

@@ -104,6 +104,83 @@ impl Drop for Reservation {
 
 실제 `Reservation`에는 incremental `try_grow`와 일부 grant를 돌려주는 `shrink`가 필요할 수 있다. Integer overflow, concurrent compare-and-swap, partial growth, cancellation, hierarchical budget, double release 방지를 테스트해야 한다. 실행 가능한 최소 구현은 저장소의 `examples/memory-lab`에 있다.
 
+## 실전 예제 1 — Request admission과 bounded backpressure
+
+Admission에서 중요한 ownership 규칙은 **실패한 task를 잃지 않고 caller에게 돌려주는 것**이다. Caller는 동일한 task를 bounded queue에 넣거나 즉시 reject할 수 있다.
+
+```rust,ignore
+use memory_lab::{Admission, MemoryPool, admit};
+
+let pool = MemoryPool::new(512 * 1024 * 1024);
+let initial_estimate = request.estimated_build_bytes();
+
+match admit(&pool, request, initial_estimate) {
+    Admission::Admitted { task, reservation } => {
+        // Reservation을 task와 함께 move한다. Task가 끝나면 Drop으로 반환된다.
+        workers.submit(move || run_query(task, reservation));
+    }
+    Admission::Backpressured { task, error } => {
+        // queue도 반드시 bounded여야 한다.
+        if waiting_queue.try_send(task).is_err() {
+            return Err(resource_exhausted(error));
+        }
+    }
+}
+```
+
+이 예제에서 정확히 보장하는 것은 성공한 reservation의 합이 `MemoryPool::limit()`을 넘지 않는다는 점이다. Queue 안의 task에는 아직 grant가 없으므로, dequeue 후 다시 admission을 거쳐야 한다.
+
+실행 가능한 `admit` 구현은 [`examples/memory-lab/src/lib.rs`](https://github.com/Tangeroooo/rust-memory-for-systems-engineers/blob/main/examples/memory-lab/src/lib.rs)에 있으며 다음 조건을 test한다.
+
+- budget이 부족하면 task ownership과 error를 함께 반환
+- 활성 reservation이 `Drop`된 뒤 같은 task를 다시 admit 가능
+- concurrent admission에서도 `reserved <= limit`
+
+## 실전 예제 2 — Grow-before-allocate buffer
+
+초기 estimate만 검사해서는 실행 중 growth를 통제할 수 없다. 관리 대상 wrapper가 다음 순서를 강제해야 한다.
+
+```rust,ignore
+use memory_lab::{BudgetedBuffer, MemoryPool};
+
+let pool = MemoryPool::new(256 * 1024 * 1024);
+let mut build_side = BudgetedBuffer::new(&pool, 64 * 1024)?;
+
+for batch in input_batches {
+    // 내부 순서:
+    // 1. next logical length 계산
+    // 2. 부족한 grant를 Reservation::try_grow로 먼저 요청
+    // 3. Vec::try_reserve로 fallible allocation 시도
+    // 4. allocation 실패 시 방금 얻은 grant rollback
+    // 5. 성공한 경우에만 data 추가
+    build_side.try_extend(batch.as_bytes())?;
+}
+```
+
+`BudgetedBuffer`는 다음 invariant를 유지한다.
+
+```text
+buffer.len() <= reservation.granted_bytes()
+```
+
+그러나 `Vec::capacity()`가 logical length보다 클 수 있으므로 다음 등식은 보장하지 않는다.
+
+```text
+reservation bytes == Vec capacity bytes == allocator usable size == RSS
+```
+
+이 예제는 **domain byte accounting** 패턴이다. `Vec`의 spare capacity, allocator metadata와 fragmentation은 `B_governed`를 계산할 때 별도 headroom으로 둔다. 실제 allocator byte까지 task에 강하게 귀속해야 한다면 task-local bounded arena가 필요하다.
+
+## 구현 규칙 checklist
+
+1. Task를 worker에 보내기 전에 initial reservation을 얻는다.
+2. Reservation의 ownership을 task와 함께 이동한다.
+3. 관리 대상 state는 allocation 전에 추가 grant를 얻는다.
+4. Fallible allocation 실패 시 추가 grant를 rollback한다.
+5. Backpressure queue와 spill buffer 자체도 bounded하게 만든다.
+6. 정상 완료, cancellation, early return에서는 RAII `Drop`으로 grant를 반환한다.
+7. Abort/OOM kill에서는 `Drop`이 실행되지 않는다는 전제로 process restart와 외부 state recovery를 설계한다.
+
 ## Estimate와 accounting
 
 - **estimate:** admission 전 미래 사용량의 예측
@@ -163,3 +240,4 @@ Commitment ledger는 task attribution과 backpressure를 가능하게 한다. Co
 - **구현 확인/safety contract:** [`GlobalAlloc`](https://doc.rust-lang.org/core/alloc/trait.GlobalAlloc.html), [`handle_alloc_error`](https://doc.rust-lang.org/std/alloc/fn.handle_alloc_error.html)
 - **OS 공식:** [cgroup v2 memory controller](https://www.kernel.org/doc/html/latest/admin-guide/cgroup-v2.html#memory)
 - **이 책의 권고:** `MemoryManager`/`Reservation` interface는 표준 Rust API가 아니라 server/DB 설계 예시다.
+- **검증된 예제:** [`memory-lab`](https://github.com/Tangeroooo/rust-memory-for-systems-engineers/tree/main/examples/memory-lab)

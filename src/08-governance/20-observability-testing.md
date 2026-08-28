@@ -46,6 +46,12 @@ coverage gap = observed process/cgroup consumption - governed_charge
 - error handling이 추가 대규모 allocation을 하지 않는지 확인
 - `GlobalAlloc` 구현 자체는 unwind하면 안 된다는 safety contract 준수
 
+실습용 `memory-lab`은 admission rejection, incremental reservation, allocation 전 grant 획득 순서를 unit test로 검증한다. Linux에서는 다음 명령으로 allocator requested byte와 `RssAnon`의 coverage gap을 직접 관찰할 수 있다.
+
+```bash
+cargo run -p memory-lab --bin linux_anonymous
+```
+
 ### 3. Workload/stress test
 
 - burst size와 concurrency를 변화

@@ -58,6 +58,49 @@ impl fmt::Display for MemoryError {
 
 impl std::error::Error for MemoryError {}
 
+#[derive(Debug)]
+pub enum Admission<T> {
+    Admitted { task: T, reservation: Reservation },
+    Backpressured { task: T, error: MemoryError },
+}
+
+/// Admission 실패 시 task의 ownership을 caller에게 돌려줘 queue/reject를 선택하게 한다.
+pub fn admit<T>(pool: &MemoryPool, task: T, estimate: usize) -> Admission<T> {
+    match pool.try_reserve(estimate) {
+        Ok(reservation) => Admission::Admitted { task, reservation },
+        Err(error) => Admission::Backpressured { task, error },
+    }
+}
+
+#[derive(Debug)]
+pub enum BudgetedBufferError {
+    Budget(MemoryError),
+    Allocation(TryReserveError),
+}
+
+impl fmt::Display for BudgetedBufferError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Budget(error) => write!(formatter, "memory budget rejected growth: {error}"),
+            Self::Allocation(error) => write!(formatter, "buffer allocation failed: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for BudgetedBufferError {}
+
+impl From<MemoryError> for BudgetedBufferError {
+    fn from(error: MemoryError) -> Self {
+        Self::Budget(error)
+    }
+}
+
+impl From<TryReserveError> for BudgetedBufferError {
+    fn from(error: TryReserveError) -> Self {
+        Self::Allocation(error)
+    }
+}
+
 impl MemoryPool {
     pub fn new(limit: usize) -> Self {
         Self {
@@ -159,6 +202,71 @@ impl Drop for Reservation {
     }
 }
 
+/// Logical byte growth가 reservation을 앞지르지 않도록 감싼 buffer 예시다.
+///
+/// 이 type이 보장하는 것은 `len <= reservation.bytes()`다. Allocator가 실제로
+/// 확보한 capacity, metadata, fragmentation, RSS까지 같은 값이라는 뜻은 아니다.
+#[derive(Debug)]
+pub struct BudgetedBuffer {
+    bytes: Vec<u8>,
+    reservation: Reservation,
+}
+
+impl BudgetedBuffer {
+    pub fn new(pool: &MemoryPool, initial_grant: usize) -> Result<Self, BudgetedBufferError> {
+        // 순서가 중요하다. Application grant를 먼저 얻고 allocation을 시도한다.
+        let reservation = pool.try_reserve(initial_grant)?;
+        let mut bytes = Vec::new();
+        bytes.try_reserve(initial_grant)?;
+
+        Ok(Self { bytes, reservation })
+    }
+
+    pub fn try_extend(&mut self, input: &[u8]) -> Result<(), BudgetedBufferError> {
+        let next_len = self
+            .bytes
+            .len()
+            .checked_add(input.len())
+            .ok_or(MemoryError::Overflow)?;
+        let additional_grant = next_len.saturating_sub(self.reservation.bytes());
+
+        // Grow-before-allocate: collection을 늘리기 전에 commitment부터 승인받는다.
+        if additional_grant > 0 {
+            self.reservation.try_grow(additional_grant)?;
+        }
+
+        if let Err(error) = self.bytes.try_reserve(input.len()) {
+            // Allocation 자체가 실패하면 방금 얻은 grant를 rollback한다.
+            if additional_grant > 0 {
+                self.reservation
+                    .shrink(additional_grant)
+                    .expect("the same call just acquired this grant");
+            }
+            return Err(BudgetedBufferError::Allocation(error));
+        }
+
+        self.bytes.extend_from_slice(input);
+        debug_assert!(self.bytes.len() <= self.reservation.bytes());
+        Ok(())
+    }
+
+    pub fn len(&self) -> usize {
+        self.bytes.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.bytes.is_empty()
+    }
+
+    pub fn capacity(&self) -> usize {
+        self.bytes.capacity()
+    }
+
+    pub fn granted_bytes(&self) -> usize {
+        self.reservation.bytes()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -201,6 +309,32 @@ mod tests {
     }
 
     #[test]
+    fn admission_returns_task_ownership_when_budget_is_exhausted() {
+        let pool = MemoryPool::new(100);
+        let active = pool.try_reserve(80).unwrap();
+
+        match admit(&pool, String::from("query-42"), 30) {
+            Admission::Backpressured { task, error } => {
+                assert_eq!(task, "query-42");
+                assert_eq!(
+                    error,
+                    MemoryError::Exhausted {
+                        requested: 30,
+                        available: 20,
+                    }
+                );
+            }
+            Admission::Admitted { .. } => panic!("query should have been backpressured"),
+        }
+
+        drop(active);
+        assert!(matches!(
+            admit(&pool, "query-42", 30),
+            Admission::Admitted { .. }
+        ));
+    }
+
+    #[test]
     fn reservation_grows_before_work_and_can_return_unused_grant() {
         let pool = MemoryPool::new(100);
         let mut grant = pool.try_reserve(40).unwrap();
@@ -228,6 +362,34 @@ mod tests {
         );
 
         drop(grant);
+        assert_eq!(pool.reserved(), 0);
+    }
+
+    #[test]
+    fn budgeted_buffer_gets_more_grant_before_growing() {
+        let pool = MemoryPool::new(100);
+        let mut buffer = BudgetedBuffer::new(&pool, 32).unwrap();
+
+        buffer.try_extend(&[1; 20]).unwrap();
+        assert_eq!(buffer.len(), 20);
+        assert_eq!(buffer.granted_bytes(), 32);
+        assert_eq!(pool.reserved(), 32);
+
+        buffer.try_extend(&[2; 50]).unwrap();
+        assert_eq!(buffer.len(), 70);
+        assert_eq!(buffer.granted_bytes(), 70);
+        assert_eq!(pool.reserved(), 70);
+        assert_eq!(
+            pool.try_reserve(31).unwrap_err(),
+            MemoryError::Exhausted {
+                requested: 31,
+                available: 30,
+            }
+        );
+
+        // Vec capacity는 allocator 정책 때문에 logical grant보다 클 수 있다.
+        assert!(buffer.capacity() >= buffer.len());
+        drop(buffer);
         assert_eq!(pool.reserved(), 0);
     }
 

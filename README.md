@@ -6,6 +6,22 @@
 
 > Rust의 ownership은 메모리 사용량을 제한하는 체계가 아니라, 값의 lifetime과 접근 권한을 관리하는 체계다.
 
+## 이 문서를 만드는 이유
+
+C++ 시스템에서는 모든 대상 allocation을 capped allocator에 통과시키고 `std::bad_alloc`을 task boundary에서 처리하는 구조를 만들 수 있다. 이때 admission은 workload 분배와 backpressure를 담당하고, allocator failure는 estimate 오차를 막는 마지막 recoverable boundary가 된다.
+
+일반적인 Rust `std` 프로그램의 기본 경로는 다르다. `Vec::push`, `Box::new`, formatting이나 dependency 내부의 infallible allocation이 실패하면 보통 `handle_alloc_error`를 거쳐 process가 abort한다. `GlobalAlloc` 구현 자체도 현재 계약상 unwind할 수 없다.
+
+따라서 Rust server/DB에서는 allocation failure를 기다리지 않고 그보다 앞에서 다음 invariant를 만들어야 한다.
+
+```text
+sum(active workload reservations) <= governed application budget
+```
+
+이 invariant는 total RSS를 예측하는 공식이 아니다. 관리 대상 workload의 **memory commitment 상한**이다. Heap 밖의 anonymous memory, allocator overhead/retention, stack, native allocation, page cache와 socket charge는 headroom, 관측, bounded arena, cgroup으로 별도 통제한다.
+
+이 논지의 전체 설명은 [왜 allocation failure 대신 admission인가](src/01-mental-model/00-why-admission.md)에서 시작한다.
+
 ## 대상 독자
 
 - C/C++의 pointer, RAII, `malloc`/`free`, `std::unique_ptr`에 익숙한 시스템 개발자
@@ -51,7 +67,7 @@ Server & DB governance
 
 ## 가장 먼저 읽을 장
 
-[Rust가 막는 문제와 막지 않는 문제](src/01-mental-model/02-safety-boundary.md)는 이 교재의 핵심 경계선을 한 표로 정리한다. `use-after-free`, `double free`, `dangling reference`, safe Rust의 `data race`와 `leak`, `Arc`/`Rc` cycle, 무제한 cache, fragmentation, allocator retention, RSS, process OOM, cgroup OOM kill을 한 문제로 섞지 않는 것이 출발점이다.
+[왜 allocation failure 대신 admission인가](src/01-mental-model/00-why-admission.md)는 C++의 recoverable `std::bad_alloc` 모델과 Rust의 기본 abort 경로를 비교하고, admission이 보장하는 정확한 상한을 정의한다. 이어서 [Rust가 막는 문제와 막지 않는 문제](src/01-mental-model/02-safety-boundary.md)는 `use-after-free`, `data race`, leak, allocator retention, RSS, process OOM, cgroup OOM kill의 경계를 한 표로 정리한다.
 
 ## 출처 정책
 

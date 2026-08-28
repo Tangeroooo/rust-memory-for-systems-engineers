@@ -23,6 +23,11 @@
 | RSS(resident set size) | 현재 RAM에 resident한 process page의 양을 나타내는 OS 관측값 |
 | overcommit | 미래 physical backing보다 큰 virtual/committed memory 요청을 허용할 수 있는 정책 |
 | OOM(out of memory) | memory 부족 상태의 총칭. allocator failure, abort, global/cgroup kill을 구분해야 함 |
+| anonymous memory | filesystem의 file로 backing되지 않은 mapping/page. Heap, stack, anonymous `mmap`, private Copy-on-Write page 등을 포함 |
+| admission | 작업을 시작하거나 grow할 memory commitment를 승인, 대기, 거절하는 application policy |
+| reservation | 작업에 부여한 논리적 memory 사용 권한. Physical page의 예약과 구분 |
+| charge | 관리 대상 state의 실제 growth를 application ledger에 반영한 값 |
+| headroom | allocator overhead, stack, native/direct mapping 등 governed charge 밖의 사용량과 변동을 흡수하는 여유 |
 | memory governance | budget, reservation, admission, spill, eviction, backpressure를 통한 application-level 사용량 제어 |
 
 ## 번역하지 않고 병기하는 이유

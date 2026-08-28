@@ -5,6 +5,7 @@
 
 # 1부. 하나의 메모리 문제가 아니다
 
+- [왜 allocation failure 대신 admission인가](01-mental-model/00-why-admission.md)
 - [일곱 계층 mental model](01-mental-model/01-layers.md)
 - [Rust가 막는 문제와 막지 않는 문제](01-mental-model/02-safety-boundary.md)
 - [C/C++에서 Rust로 옮겨오는 mental model](01-mental-model/03-from-cpp.md)

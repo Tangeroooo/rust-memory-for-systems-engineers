@@ -13,6 +13,23 @@ Memory system은 한 metric으로 검증할 수 없다. Language-level test, obj
 | cgroup | `memory.current`, `memory.events`, PSI | reclaim/throttle/OOM이 있었는가? |
 | Service | latency, reject, spill bytes, cancellation | memory policy가 사용자 결과에 어떤 영향을 주는가? |
 
+## Commitment와 consumption을 같이 본다
+
+Admission을 평가할 때 reservation 오차와 total memory 차이를 하나의 “정확도”로 부르지 않는다.
+
+```text
+commitment gap = reserved - governed_charge
+  → estimate 효율, over-reservation, incremental top-up 품질
+
+coverage gap = observed process/cgroup consumption - governed_charge
+  → baseline, allocator overhead/retention, stack, native/direct mmap,
+    file/socket/kernel-facing charge, 아직 추적하지 못한 경로
+```
+
+`commitment gap`이 크면 concurrency를 불필요하게 낮출 수 있다. `coverage gap`이 예상 headroom보다 계속 커지면 allocator profile, `smaps_rollup`, cgroup `memory.stat`으로 발생원을 좁힌다.
+
+두 gap 모두 0이어야 한다고 가정하지 않는다. 목적은 차이를 설명 가능하고 bounded한 범위로 유지하는 것이다.
+
 ## 테스트 pyramid
 
 ### 1. Unit test
@@ -34,6 +51,7 @@ Memory system은 한 metric으로 검증할 수 없다. Language-level test, obj
 - burst size와 concurrency를 변화
 - steady state와 post-burst idle 구간을 분리
 - object count, allocator active/retained, RSS를 동시에 기록
+- reservation, governed charge, allocator active, `RssAnon`, `memory.current`의 차이를 같은 timestamp로 기록
 - 반복 후 plateau인지 지속 성장인지 확인
 
 ### 4. cgroup integration test
@@ -54,7 +72,8 @@ Memory system은 한 metric으로 검증할 수 없다. Language-level test, obj
 
 ```text
 정확성: reservation 누수와 double release가 없음
-경계: queue/cache/concurrency가 설정된 상한을 지킴
+경계: sum(reservations)가 governed budget을 넘지 않음
+coverage: untracked/headroom gap이 설명 가능한 범위에 있음
 복구: fallible allocation 실패가 task error로 전달됨
 압박: memory.high 이전에 backpressure/spill 신호가 작동
 격리: memory.max 도달 시 원인이 event/log에 남음

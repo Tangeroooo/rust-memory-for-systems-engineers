@@ -12,15 +12,17 @@ cgroup은 Rust process의 바깥에서 resource 사용을 account하고 제한�
 | `memory.events` | `high`, `max`, `oom`, `oom_kill` 등 event count | restart 사이에서도 수집해 원인을 분류 |
 | `memory.pressure` | PSI 기반 memory pressure | 단순 사용량과 stall 영향을 함께 관찰 |
 
-Kernel 문서는 `memory.high`를 주된 memory usage control mechanism으로 설명한다. `memory.max`는 최종 hard limit이며 일부 조건에서 일시적으로 초과할 수 있다.
+`memory.high`는 reclaim과 throttle을 유도하는 운영 pressure boundary다. `memory.max`는 cgroup memory usage의 hard limit이며 reclaim으로 낮출 수 없으면 OOM killer가 집행한다. 일부 조건에서는 일시적으로 limit을 초과할 수 있다.
+
+Kernel 문서는 cgroup memory controller가 anonymous memory와 page cache뿐 아니라 kernel data structure와 TCP socket buffer 같은 주요 사용량도 추적한다고 설명한다. 동시에 coverage가 완전히 water-tight하지는 않다고 명시한다. 이 범위는 Rust allocator counter보다 넓지만, task/query별 attribution을 제공하지는 않는다.
 
 ## 권장 관계
 
 ```text
 cgroup memory.max
-  └─ crash containment을 위한 최종 상한
+  └─ crash containment을 위한 최종 상한; 초과 시 graceful error가 아니라 kill 가능
 
-application hard budget
+application governed budget
   └─ memory.max보다 낮음: untracked/native/kernel-facing overhead 여유
 
 admission threshold
@@ -51,6 +53,7 @@ cgroup OOM kill
 
 - cgroup v2의 `memory.high`와 `memory.max`가 다른 제어 경계라는 점
 - `memory.events`와 pressure signal을 함께 관찰해야 한다는 점
+- `memory.max`는 넓은 범위를 강제로 containment하지만 task-level error를 보장하지 않는다는 점
 
 ### 이 장이 보장하지 않는 것
 

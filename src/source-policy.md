@@ -6,6 +6,7 @@
 
 | 범주 | 이 책에서의 의미 | 사용할 때의 주의점 |
 |---|---|---|
+| **C++ 비교 규범** | 공개된 C++ working draft의 allocation failure 계약 | Rust와의 비교 기준으로 사용한다. 특정 allocator 구현이나 Linux 동작까지 보장한다고 확대하지 않는다. |
 | **언어 규범** | Rust Reference가 정의하는 syntax와 semantics | Rust Reference도 스스로 불완전할 수 있음을 밝힌다. “ISO 표준”과 같은 완결된 형식 명세로 과장하지 않는다. |
 | **공식 학습서** | Rust Book의 안정된 학습 설명 | 이해의 출발점이지 allocator·OS 운영 보장의 출처는 아니다. |
 | **구현 확인** | standard library API 문서와 `rust-lang/rust` source | 공개 API의 documented guarantee와 현재 내부 구현을 구분한다. 내부 함수와 growth policy는 바뀔 수 있다. |
@@ -56,6 +57,7 @@ allocator 종류와 설정
 
 ### 출처와 권위
 
+- **C++ 비교 규범:** [C++ working draft — Dynamic storage allocation](https://eel.is/c++draft/basic.stc.dynamic.allocation)
 - **언어 규범:** [Rust Reference — Introduction](https://doc.rust-lang.org/reference/introduction.html)
 - **공식 학습서:** [The Rust Programming Language](https://doc.rust-lang.org/book/)
 - **한국어 용어/문체 참고:** [한국 Rust 사용자 그룹의 Rust Book 번역](https://doc.rust-kr.org/)

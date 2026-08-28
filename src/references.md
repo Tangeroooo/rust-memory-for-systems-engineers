@@ -2,6 +2,11 @@
 
 최종 확인일: **2026-08-28**. URL은 가능한 한 project의 공식 문서 또는 source repository를 가리킨다.
 
+## C++ 비교 규범
+
+- [C++ working draft — Dynamic storage allocation](https://eel.is/c++draft/basic.stc.dynamic.allocation) — throwing allocation function의 `std::bad_alloc` failure 계약
+- [C++ working draft — Storage allocation errors](https://eel.is/c++draft/new.handler) — `new_handler`가 storage 제공, `bad_alloc` throw, termination 중 하나를 수행하는 계약
+
 ## Rust 공식 학습서
 
 - [The Rust Programming Language](https://doc.rust-lang.org/book/) — ownership, borrowing, lifetime, smart pointer의 공식 학습 출처
@@ -40,6 +45,7 @@
 
 ## OS 공식 문서
 
+- [Linux kernel — Memory management concepts](https://docs.kernel.org/admin-guide/mm/concepts.html) — virtual memory, anonymous memory, reclaim의 기본 개념
 - [Linux kernel — Overcommit Accounting](https://www.kernel.org/doc/html/latest/mm/overcommit-accounting.html)
 - [Linux kernel — Control Group v2](https://www.kernel.org/doc/html/latest/admin-guide/cgroup-v2.html)
 - [Linux kernel — Pressure Stall Information](https://www.kernel.org/doc/html/latest/accounting/psi.html)

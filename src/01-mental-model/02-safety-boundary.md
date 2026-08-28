@@ -17,6 +17,7 @@
 | internal/external fragmentation | **아니요** | allocator의 size class, arena, workload lifetime 분포 문제다. |
 | allocator retention | **아니요** | deallocated block을 allocator가 재사용 목적으로 보관할 수 있다. |
 | 높은 RSS | **아니요** | RSS에는 heap 이외의 resident page도 포함되며 allocator/OS 정책의 영향을 받는다. |
+| recoverable global OOM exception | **아니요** | 일반적인 `std` 기본 allocation failure는 process abort로 이어진다. `try_reserve`처럼 명시적인 fallible 경로는 별도다. |
 | process OOM/abort | **아니요** | 일반적인 infallible allocation API는 allocation failure를 정상 `Result`로 돌려주지 않을 수 있다. |
 | Linux OOM killer | **아니요** | overcommit 후 page fault 시점의 물리 메모리 부족은 언어 규칙 밖의 문제다. |
 | cgroup OOM kill | **아니요** | `memory.max`와 reclaim 조건은 kernel resource control의 영역이다. |

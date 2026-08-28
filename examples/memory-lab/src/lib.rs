@@ -31,6 +31,7 @@ struct PoolInner {
 pub enum MemoryError {
     Overflow,
     Exhausted { requested: usize, available: usize },
+    ReleaseExceedsReservation { requested: usize, reserved: usize },
 }
 
 impl fmt::Display for MemoryError {
@@ -43,6 +44,13 @@ impl fmt::Display for MemoryError {
             } => write!(
                 formatter,
                 "memory budget exhausted: requested {requested}, available {available}"
+            ),
+            Self::ReleaseExceedsReservation {
+                requested,
+                reserved,
+            } => write!(
+                formatter,
+                "cannot release {requested} bytes from a {reserved}-byte reservation"
             ),
         }
     }
@@ -69,32 +77,37 @@ impl MemoryPool {
     }
 
     pub fn try_reserve(&self, bytes: usize) -> Result<Reservation, MemoryError> {
-        let mut current = self.inner.reserved.load(Ordering::Acquire);
+        self.inner.try_acquire(bytes)?;
+        Ok(Reservation {
+            inner: Arc::clone(&self.inner),
+            bytes,
+        })
+    }
+}
+
+impl PoolInner {
+    fn try_acquire(&self, bytes: usize) -> Result<(), MemoryError> {
+        let mut current = self.reserved.load(Ordering::Acquire);
 
         loop {
             let Some(next) = current.checked_add(bytes) else {
                 return Err(MemoryError::Overflow);
             };
 
-            if next > self.inner.limit {
+            if next > self.limit {
                 return Err(MemoryError::Exhausted {
                     requested: bytes,
-                    available: self.inner.limit.saturating_sub(current),
+                    available: self.limit.saturating_sub(current),
                 });
             }
 
-            match self.inner.reserved.compare_exchange_weak(
+            match self.reserved.compare_exchange_weak(
                 current,
                 next,
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
-                Ok(_) => {
-                    return Ok(Reservation {
-                        inner: Arc::clone(&self.inner),
-                        bytes,
-                    });
-                }
+                Ok(_) => return Ok(()),
                 Err(observed) => current = observed,
             }
         }
@@ -111,6 +124,31 @@ pub struct Reservation {
 impl Reservation {
     pub fn bytes(&self) -> usize {
         self.bytes
+    }
+
+    /// 관리 대상 state를 grow하기 전에 grant를 늘린다.
+    pub fn try_grow(&mut self, additional: usize) -> Result<(), MemoryError> {
+        self.inner.try_acquire(additional)?;
+        self.bytes = self
+            .bytes
+            .checked_add(additional)
+            .expect("pool acquisition already checked reservation overflow");
+        Ok(())
+    }
+
+    /// 더 이상 필요하지 않은 grant 일부를 pool에 즉시 돌려준다.
+    pub fn shrink(&mut self, bytes: usize) -> Result<(), MemoryError> {
+        if bytes > self.bytes {
+            return Err(MemoryError::ReleaseExceedsReservation {
+                requested: bytes,
+                reserved: self.bytes,
+            });
+        }
+
+        self.bytes -= bytes;
+        let previous = self.inner.reserved.fetch_sub(bytes, Ordering::AcqRel);
+        debug_assert!(previous >= bytes, "reservation counter underflow");
+        Ok(())
     }
 }
 
@@ -159,6 +197,37 @@ mod tests {
                 }
             );
         }
+        assert_eq!(pool.reserved(), 0);
+    }
+
+    #[test]
+    fn reservation_grows_before_work_and_can_return_unused_grant() {
+        let pool = MemoryPool::new(100);
+        let mut grant = pool.try_reserve(40).unwrap();
+
+        grant.try_grow(50).unwrap();
+        assert_eq!(grant.bytes(), 90);
+        assert_eq!(pool.reserved(), 90);
+        assert_eq!(
+            grant.try_grow(20).unwrap_err(),
+            MemoryError::Exhausted {
+                requested: 20,
+                available: 10,
+            }
+        );
+
+        grant.shrink(30).unwrap();
+        assert_eq!(grant.bytes(), 60);
+        assert_eq!(pool.reserved(), 60);
+        assert_eq!(
+            grant.shrink(61).unwrap_err(),
+            MemoryError::ReleaseExceedsReservation {
+                requested: 61,
+                reserved: 60,
+            }
+        );
+
+        drop(grant);
         assert_eq!(pool.reserved(), 0);
     }
 

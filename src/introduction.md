@@ -11,6 +11,20 @@ Rust의 메모리 관리를 `ownership` 하나로 설명하면 중요한 절반�
 - **memory safety:** 이 reference를 역참조해도 유효한가? 같은 메모리에 충돌하는 접근이 있는가? 누가 `Drop`할 것인가?
 - **memory capacity:** 이 작업이 몇 byte를 필요로 하는가? process와 cgroup의 여유는 얼마인가? 초과하면 대기, spill, 실패 중 무엇을 할 것인가?
 
+## 왜 allocation failure까지 기다릴 수 없는가
+
+C++에서 capped allocator와 `std::bad_alloc`을 task boundary에 연결해 본 개발자라면 allocation failure를 마지막 recoverable guard로 생각하기 쉽다. Admission은 workload 분배와 backpressure를 담당하고, estimate가 틀리면 allocator exception이 작업만 실패시키는 구조다.
+
+일반적인 Rust `std` 프로그램에서는 같은 전제를 둘 수 없다. Infallible collection allocation이 실패하면 기본적으로 process abort로 이어지며, `GlobalAlloc` 구현도 unwind할 수 없다. `try_reserve`는 일부 collection growth를 fallible하게 만들지만 dependency와 이후의 모든 allocation을 자동으로 포함하지 않는다.
+
+따라서 이 책의 핵심 질문은 다음과 같다.
+
+> **Recoverable global OOM boundary가 없는 Rust server/DB에서, process를 죽이지 않고 workload를 어떻게 제한할 것인가?**
+
+답은 “초기 estimate를 완벽하게 맞힌다”가 아니다. 관리 대상 작업에 reservation을 부여하고, grow 전에 incremental grant를 얻도록 하여 commitment의 합을 제한한다. Total RSS에 포함되지만 이 accounting 밖에 있는 anonymous/native/kernel-facing memory는 별도 headroom과 cgroup으로 통제한다.
+
+이 차이는 [왜 allocation failure 대신 admission인가](01-mental-model/00-why-admission.md)에서 먼저 자세히 설명한다.
+
 ## 읽는 순서
 
 ```text

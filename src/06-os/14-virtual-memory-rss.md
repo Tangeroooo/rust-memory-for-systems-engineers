@@ -124,6 +124,20 @@ cargo run -p memory-lab --bin linux_anonymous
 
 전체 코드는 [`linux_anonymous.rs`](https://github.com/Tangeroooo/rust-memory-for-systems-engineers/blob/main/examples/memory-lab/src/bin/linux_anonymous.rs)에 있다. 예제는 `/proc/self/status`의 `VmRSS`, `RssAnon`과 global allocator requested byte를 함께 출력한다.
 
+GitHub Actions의 Linux runner에서 관측한 한 실행은 다음과 같았다. 이 숫자는 보장이 아니라 결과를 읽는 예시다.
+
+```text
+              baseline | allocator_live=      1572 B | RssAnon=   136 KiB
+      Vec heap touched | allocator_live=   8390180 B | RssAnon=  8336 KiB
+   direct mmap touched | allocator_live=   8390180 B | RssAnon= 16528 KiB
+     thread stack peak | allocator_live=   8390309 B | RssAnon= 17592 KiB
+     after Drop/munmap | allocator_live=      1572 B | RssAnon=   172 KiB
+
+direct mmap allocator counter delta: 0 B
+```
+
+`Vec`를 touch했을 때 두 ledger가 함께 증가했다. 반면 direct anonymous `mmap` 8 MiB를 touch했을 때 allocator counter는 그대로였지만 `RssAnon`은 약 8 MiB 증가했다. Thread stack을 touch했을 때도 allocator requested byte의 작은 변화에 비해 `RssAnon`이 더 증가했다. 이것이 application allocator accounting 바깥에 headroom이 필요한 구체적인 이유다.
+
 결과는 allocator, kernel, optimization, page size에 따라 달라진다. 다음과 같은 exact assertion을 작성하면 안 된다.
 
 ```text

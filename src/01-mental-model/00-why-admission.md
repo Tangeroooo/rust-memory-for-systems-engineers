@@ -6,6 +6,8 @@
 
 Admission은 단순한 예측 기법이 아니다. 올바르게 구현하면 관리 대상 workload에 부여한 **memory commitment의 합**에 대해 정확한 invariant를 만든다. 다만 그 invariant를 process의 total RSS와 동일시해서는 안 된다.
 
+[첫 화면의 추적 구성 비교](../introduction.md#먼저-비교하기--어디서-세고-어디서-거절하는가)는 양쪽 모두 allocation byte를 셀 수 있음을 먼저 보여준다. Rust의 관리 대상 buffer도 **다음 allocation의 Layout을 구한 뒤, 그 크기를 승인받고, 실패하면 `Result`로 돌아오는 구성**을 만들 수 있다. “Rust에서는 모두 추측해야 한다”와 “추적할 수 없다”는 결론은 맞지 않는다. [실전 정렬 예제](../08-governance/18a-deterministic-reservation.md)에서 이 구성을 확인한다.
+
 ## C++ 개발자에게 익숙한 제어 방식
 
 C++에서는 다음 구조를 만들 수 있다.

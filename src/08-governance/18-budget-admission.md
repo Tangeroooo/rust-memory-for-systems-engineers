@@ -75,7 +75,7 @@ TaskReservation (RAII)
 4. try_reserve Err → reservation 반환, task error
 5. 성공한 growth를 domain charge에 반영
 6. estimate와 charge, allocator/OS 관측값 reconcile
-7. 완료/취소 시 reservation Drop
+7. 관리 대상 storage의 최종 owner가 dealloc한 뒤 reservation Drop
 ```
 
 ## API boundary 예시
@@ -116,7 +116,7 @@ let initial_estimate = request.estimated_build_bytes();
 
 match admit(&pool, request, initial_estimate) {
     Admission::Admitted { task, reservation } => {
-        // Reservation을 task와 함께 move한다. Task가 끝나면 Drop으로 반환된다.
+        // Reservation을 task와 함께 move한다. 결과가 남으면 grant도 함께 넘긴다.
         workers.submit(move || run_query(task, reservation));
     }
     Admission::Backpressured { task, error } => {
@@ -136,7 +136,7 @@ match admit(&pool, request, initial_estimate) {
 - 활성 reservation이 `Drop`된 뒤 같은 task를 다시 admit 가능
 - concurrent admission에서도 `reserved <= limit`
 
-## 실전 예제 2 — Grow-before-allocate buffer
+## 입문 예제 2 — Logical byte accounting의 한계
 
 초기 estimate만 검사해서는 실행 중 growth를 통제할 수 없다. 관리 대상 wrapper가 다음 순서를 강제해야 한다.
 
@@ -169,7 +169,22 @@ buffer.len() <= reservation.granted_bytes()
 reservation bytes == Vec capacity bytes == allocator usable size == RSS
 ```
 
-이 예제는 **domain byte accounting** 패턴이다. `Vec`의 spare capacity, allocator metadata와 fragmentation은 `B_governed`를 계산할 때 별도 headroom으로 둔다. 실제 allocator byte까지 task에 강하게 귀속해야 한다면 task-local bounded arena가 필요하다.
+이 예제는 **logical/domain byte accounting** 패턴일 뿐 requested allocation byte의 hard cap이 아니다. `Vec`의 spare capacity와 growth overlap이 grant 밖으로 나갈 수 있다. 이를 측정해 운영 headroom을 잡을 수는 있지만, 임의의 고정 headroom이 이 차이를 항상 덮는다는 증명은 없다.
+
+### 실제 allocation에 연결한 다음 단계
+
+[실습: estimate에서 deterministic 반환까지](18a-deterministic-reservation.md)는 이 한계를 보완한다. 고정 폭 row의 **capacity 전체 Layout**을 승인하고, 새 block을 만들 때는 old와 new가 공존하는 peak까지 charge한다.
+
+```text
+4 rows × 16 B = 64 B 승인
+5번째 row → capacity 8로 growth
+old 64 B를 유지한 채 new 128 B 추가 승인 → peak 192 B
+copy → old dealloc → old grant 64 B 반환 → 128 B 유지
+정렬 완료 → output에 storage와 grant를 함께 move
+최종 output Drop → dealloc → 128 B 반환
+```
+
+여기서는 초기 estimate가 틀리더라도 다음 allocation의 크기를 **요청 전에 계산**한다. Unsafe 부분은 storage wrapper인 `Block`/`SortBuffer` 내부에 한정하며, 상위 operator는 fallible `push`와 ownership API를 사용한다. Bounded arena만이 유일한 선택은 아니다. 명시적 Layout allocation wrapper로도 관리 대상 requested byte의 cap을 만들 수 있다.
 
 ## 구현 규칙 checklist
 
@@ -178,7 +193,7 @@ reservation bytes == Vec capacity bytes == allocator usable size == RSS
 3. 관리 대상 state는 allocation 전에 추가 grant를 얻는다.
 4. Fallible allocation 실패 시 추가 grant를 rollback한다.
 5. Backpressure queue와 spill buffer 자체도 bounded하게 만든다.
-6. 정상 완료, cancellation, early return에서는 RAII `Drop`으로 grant를 반환한다.
+6. 정상 완료, cancellation, early return에서 **storage가 소멸할 때** RAII `Drop`으로 grant를 반환한다. 결과가 살아 있으면 grant도 그 결과와 함께 이동한다.
 7. Abort/OOM kill에서는 `Drop`이 실행되지 않는다는 전제로 process restart와 외부 state recovery를 설계한다.
 
 ## Estimate와 accounting

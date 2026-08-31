@@ -38,3 +38,8 @@
     min-height: 24rem;
   }
 }
+
+/* 비교 그림은 좁은 화면에서도 legend까지 보이며, 가로로 스크롤한다. */
+.memory-diagram--comparison {
+  min-height: 560px;
+}

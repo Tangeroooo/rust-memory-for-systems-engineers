@@ -45,6 +45,7 @@
 # 8부. Server/DB governance — 예산과 제어
 
 - [Memory budget과 admission](08-governance/18-budget-admission.md)
+- [실습: estimate에서 deterministic 반환까지](08-governance/18a-deterministic-reservation.md)
 - [Spill, eviction, backpressure](08-governance/19-spill-eviction.md)
 - [관측과 검증 전략](08-governance/20-observability-testing.md)
 

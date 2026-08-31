@@ -1,5 +1,7 @@
 //! 교재의 핵심 개념을 검증하는 dependency-free 실습 코드다.
 
+pub mod tracked_sort;
+
 use std::collections::TryReserveError;
 use std::fmt;
 use std::sync::{

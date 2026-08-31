@@ -67,7 +67,11 @@ Server & DB governance
 
 ## 가장 먼저 읽을 장
 
+[첫 화면의 C++ / Rust 추적 구성 비교](https://tangeroooo.github.io/rust-memory-for-systems-engineers/introduction.html)는 어디서 byte를 세고, 한도를 집행하고, 실패를 task로 돌려주는지 보여준다.
+
 [왜 allocation failure 대신 admission인가](src/01-mental-model/00-why-admission.md)는 C++의 recoverable `std::bad_alloc` 모델과 Rust의 기본 abort 경로를 비교하고, admission이 보장하는 정확한 상한을 정의한다. 이어서 [Rust가 막는 문제와 막지 않는 문제](src/01-mental-model/02-safety-boundary.md)는 `use-after-free`, `data race`, leak, allocator retention, RSS, process OOM, cgroup OOM kill의 경계를 한 표로 정리한다.
+
+[실습: estimate에서 deterministic 반환까지](src/08-governance/18a-deterministic-reservation.md)에서는 16-byte record 정렬을 구현한다. 초기 64 B 계산, growth 중 old 64 + new 128 = 192 B 승인, 실패 rollback, 결과 ownership과 최종 반환을 코드와 test로 확인한다.
 
 ## 출처 정책
 
@@ -106,11 +110,13 @@ mdbook build
 
 - concurrent request admission과 reservation RAII
 - budget 부족 시 task ownership을 돌려주는 backpressure 경계
-- `BudgetedBuffer`의 grow-before-allocate와 grant rollback
+- `BudgetedBuffer`의 logical accounting과 그 한계
+- `tracked_sort`의 Layout-based requested-byte cap, old/new overlap, null failure injection, dealloc-before-release, 결과 lifetime
 - Linux에서 `Vec` heap, direct `MAP_ANONYMOUS`, thread stack이 allocator counter와 `RssAnon`에 다르게 나타나는 실험
 
 ```bash
 cargo test --workspace --all-targets
+cargo run -p memory-lab --bin budget_timeline
 
 # Linux 전용 관측 실험
 cargo run -p memory-lab --bin linux_anonymous

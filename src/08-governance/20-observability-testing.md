@@ -46,7 +46,14 @@ coverage gap = observed process/cgroup consumption - governed_charge
 - error handling이 추가 대규모 allocation을 하지 않는지 확인
 - `GlobalAlloc` 구현 자체는 unwind하면 안 된다는 safety contract 준수
 
-실습용 `memory-lab`은 admission rejection, incremental reservation, allocation 전 grant 획득 순서를 unit test로 검증한다. Linux에서는 다음 명령으로 allocator requested byte와 `RssAnon`의 coverage gap을 직접 관찰할 수 있다.
+실습용 `memory-lab`은 admission rejection, incremental reservation, allocation 전 grant 획득 순서를 unit test로 검증한다. [정렬 실습](18a-deterministic-reservation.md)의 `Probe`는 global allocator로 등록하지 않은 test 전용 allocator다. Growth 한 번에 null을 주입하고, 새 grant만 rollback되는지와 old storage가 유지되는지를 확인한다. 실제 OOM을 일으키거나 RSS가 정확히 감소하기를 기다리지 않는다.
+
+```bash
+cargo test -p memory-lab tracked_sort
+cargo run -p memory-lab --bin budget_timeline
+```
+
+Linux에서는 다음 명령으로 allocator requested byte와 `RssAnon`의 coverage gap을 직접 관찰할 수 있다.
 
 ```bash
 cargo run -p memory-lab --bin linux_anonymous

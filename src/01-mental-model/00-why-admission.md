@@ -6,7 +6,7 @@
 
 Admission은 단순한 예측 기법이 아니다. 올바르게 구현하면 관리 대상 workload에 부여한 **memory commitment의 합**에 대해 정확한 invariant를 만든다. 다만 그 invariant를 process의 total RSS와 동일시해서는 안 된다.
 
-[첫 화면의 추적 구성 비교](../introduction.md#먼저-비교하기--어디서-세고-어디서-거절하는가)는 양쪽 모두 allocation byte를 셀 수 있음을 먼저 보여준다. Rust의 관리 대상 buffer도 **다음 allocation의 Layout을 구한 뒤, 그 크기를 승인받고, 실패하면 `Result`로 돌아오는 구성**을 만들 수 있다. “Rust에서는 모두 추측해야 한다”와 “추적할 수 없다”는 결론은 맞지 않는다. [실전 정렬 예제](../08-governance/18a-deterministic-reservation.md)에서 이 구성을 확인한다.
+[첫 화면의 추적 구성 비교](../introduction.md#먼저-비교하기--어디서-세고-어디서-거절하는가)는 **C++의 allocator 통제 영역**과 **Rust의 reservation 연결 영역**을 비교한다. Rust의 자체 buffer도 다음 allocation의 Layout을 계산하고 승인받는 구성을 만들 수 있지만, 외부 crate의 내부 allocation이 그 구성에 자동 참여하지는 않는다. [실전 정렬 예제](../08-governance/18a-deterministic-reservation.md)는 통제 가능한 경로를, 이 장의 혼합 사례는 그 밖에 남는 경로를 설명한다.
 
 ## C++ 개발자에게 익숙한 제어 방식
 
@@ -72,6 +72,37 @@ handle_alloc_error
 ```
 
 Rust에서 recoverable path를 만들려면 allocation 이전에 명시적으로 `try_reserve` 같은 fallible API를 호출하고, 이후 경로가 확보한 capacity 밖에서 다시 allocation하지 않는다는 구조를 만들어야 한다. Transitive dependency의 infallible allocation까지 자동으로 바뀌는 것은 아니다.
+
+## 실제 library를 넣으면 드러나는 차이
+
+### C++: allocator-aware library에 resource를 전달한 경우
+
+Boost.JSON의 `parse`는 결과 value의 저장소를 지정하는 `storage_ptr`를 받는다. 이 resource는 결과와 그 하위 element에 사용되며, resource의 allocation exception은 caller로 전달될 수 있다. 따라서 **계측과 cap을 구현한 resource를 연결하면 library 내부의 해당 allocation도 counter와 거절 규칙에 참여한다.** 이는 Boost.JSON의 public API 계약이지, 모든 C++ library에 대한 보장이 아니다. [Boost.JSON — parse](https://www.boost.org/latest/libs/json/doc/html/ref/parse.html), [storage_ptr](https://www.boost.org/latest/libs/json/doc/html/allocators/storage_ptr.html)
+
+단, 결과의 resource를 지정했다고 parser의 temporary storage까지 모두 같은 계정으로 들어간다고 가정해서는 안 된다. Parser scratch의 resource와 수명도 별도로 확인해야 한다. [Boost.JSON — input/output](https://www.boost.org/latest/libs/json/doc/html/input_output.html)
+
+### Rust: `Result`를 반환하는 외부 crate라도 OOM은 별개다
+
+예를 들어 `serde_json::from_slice::<Vec<String>>(input)`은 `Result`를 반환한다. 그러나 확인한 Serde 1.0.228의 `Vec<T>` deserializer는 `Vec::with_capacity`와 `push`를 사용하고, `StringVisitor::visit_str`는 `to_owned`를 사용한다. 이러한 경로는 caller의 memory pool이나 reservation을 받지 않으며, allocation failure를 공통 `Err`로 변환하는 계약도 아니다. [serde_json — from_slice](https://docs.rs/serde_json/latest/serde_json/fn.from_slice.html), [Serde 1.0.228 구현](https://github.com/serde-rs/serde/blob/v1.0.228/serde_core/src/de/impls.rs)
+
+이때 다음 세 질문의 답은 서로 다르다.
+
+| 질문 | 이 혼합 구성에서의 답 |
+|---|---|
+| 계측용 global allocator에서 해당 요청을 볼 수 있는가? | 그 allocator를 통과한 요청은 관측 가능 |
+| Caller의 task reservation이 자동 증가하는가? | 아니요. Pool·charge 경로를 별도로 연결해야 함 |
+| 호출 결과의 `?`로 allocation failure까지 복구하는가? | 아니요. 기본 OOM abort는 `Result`로 돌아오지 않음 |
+
+Caller가 `input.len()`만큼 미리 reserve해도 이 연결이 생기지는 않는다. JSON 문자열, `String` 객체 배열의 capacity, 중간 scratch처럼 **입력 byte와 다른 크기의 allocation**이 발생할 수 있기 때문이다. Task별 tracking allocator를 직접 설계하는 방법도 있지만, async task의 thread 이동, 결과 소유권 이전과 나중의 deallocation을 올바른 계정에 귀속시켜야 한다. 계측을 추가해도 infallible failure가 저절로 fallible해지지는 않는다.
+
+### 그러면 어떤 경로를 어느 강도로 통제하는가
+
+- **직접 관리하는 buffer:** 다음 Layout의 byte를 승인받은 뒤 fallible allocate/grow한다. Grant는 storage owner에 붙여 deallocation 뒤 반환한다.
+- **Bounded API를 제공하는 dependency:** 출력 크기·scratch·allocation failure 계약을 확인하고 reservation에 연결한다. 설정 이름만으로 전체 경로가 포함된다고 가정하지 않는다.
+- **연결하지 못한 dependency:** 호출 전에 입력 크기와 동시 실행 수를 제한하고, 관측한 peak를 headroom 산정에 반영한다. `입력 상한 × 동시 실행 수`만으로 memory bound가 증명되는 것은 아니므로 expansion과 scratch도 확인한다.
+- **상한이나 복구 계약을 확보할 수 없는 경로:** 높은 위험의 입력을 거절하거나 별도 process/cgroup으로 격리한다. 이는 작업 실패의 영향을 격리하는 것이지 해당 allocation을 fallible하게 만드는 것은 아니다.
+
+앞의 두 항목은 명시적으로 연결한 범위의 집행이고, 세 번째는 남은 위험을 줄이는 운영 정책이다. **Headroom이 남는 위험을 hard bound로 바꾸지는 않는다.**
 
 ## 두 언어의 기본 경계를 정확히 비교하기
 
@@ -189,4 +220,6 @@ Server/DB의 일반적인 추천은 두 번째 단계를 기본으로 하고, �
 - **C++ 비교 규범:** [C++ working draft — Dynamic storage allocation](https://eel.is/c++draft/basic.stc.dynamic.allocation), [Storage allocation errors](https://eel.is/c++draft/new.handler)
 - **구현 확인/public contract:** [`GlobalAlloc` safety and errors](https://doc.rust-lang.org/core/alloc/trait.GlobalAlloc.html), [`handle_alloc_error`](https://doc.rust-lang.org/std/alloc/fn.handle_alloc_error.html), [`TryReserveError`](https://doc.rust-lang.org/std/collections/struct.TryReserveError.html)
 - **설계 배경:** [RFC 2116 — Alloc Me Maybe](https://github.com/rust-lang/rfcs/blob/master/text/2116-alloc-me-maybe.md)
+- **외부 library의 공식 API 계약:** [Boost.JSON parse](https://www.boost.org/latest/libs/json/doc/html/ref/parse.html), [storage_ptr](https://www.boost.org/latest/libs/json/doc/html/allocators/storage_ptr.html), [serde_json from_slice](https://docs.rs/serde_json/latest/serde_json/fn.from_slice.html)
+- **외부 crate 구현 확인:** [Serde 1.0.228 — Vec/String deserialization](https://github.com/serde-rs/serde/blob/v1.0.228/serde_core/src/de/impls.rs). 특정 version의 확인이며 Rust 언어의 보장이 아니다.
 - **OS 공식:** [Linux memory management concepts — Anonymous Memory](https://docs.kernel.org/admin-guide/mm/concepts.html#anonymous-memory), [cgroup v2 memory controller](https://docs.kernel.org/admin-guide/cgroup-v2.html#memory)

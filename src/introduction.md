@@ -4,23 +4,33 @@ Rust의 메모리 관리를 `ownership` 하나로 설명하면 중요한 절반�
 
 ## 먼저 비교하기 — 어디서 세고, 어디서 거절하는가
 
-아래는 **관리 대상 allocation을 연결해 놓은 C++ 구성**과 **명시적인 fallible 경로를 만든 Rust 구성**의 비교다. 두 언어의 기본 설정을 비교하는 그림이 아니다. C++의 `std::pmr::memory_resource`도 자동으로 cap을 제공하지 않으며, Rust의 `ownership`도 자동으로 budget을 제공하지 않는다.
+아래는 **전용 allocator에 자체 컴포넌트와 allocator-aware library를 연결한 C++ 구성**과 **명시적인 reservation 경로와 외부 crate의 infallible allocation이 섞인 Rust 구성**의 비교다. C++의 장점은 연결된 allocation을 한 지점에서 계측하고, 한도 초과를 `std::bad_alloc`으로 전달할 수 있다는 것이다. Rust에서 어려운 부분은 자체 buffer에 만든 reservation 규칙이 외부 crate 내부의 allocation까지 자동으로 적용되지 않는다는 것이다.
 
 <iframe class="memory-diagram memory-diagram--wide memory-diagram--comparison" src="assets/diagrams/tracking-comparison.html" title="C++와 Rust의 메모리 영역·추적 범위"></iframe>
 
 [비교 다이어그램을 크게 열기](assets/diagrams/tracking-comparison.html). 좁은 화면에서는 그림을 가로로 스크롤할 수 있다.
 
-그림은 호출 순서가 아니라 **process 안의 메모리 영역과 accounting 경계의 포함 관계**를 보여준다. 큰 면 안에 allocator의 backing 영역이 있고, 그 안의 강조한 면이 task에 charge한 storage다. 사용 중인 slot뿐 아니라 여유 capacity도 이 면에 포함된다. Stack과 직접 `mmap`처럼 선택한 allocator를 통과하지 않는 영역은 아래에 분리했다. 면적은 byte 비율이 아니며, 실행 코드와 file-backed mapping 등은 비교의 초점을 위해 생략했다. Reservation 자체가 물리적인 메모리 영역이라는 뜻도 아니다.
+그림은 호출 순서가 아니라 **allocation이 어느 계측·통제 경계에 속하는지**를 면의 포함 관계로 보여준다. 검은 테두리 안은 관리 규칙을 연결한 영역이고, Rust의 붉은 영역은 allocator에서 관측할 수 있어도 task reservation에는 연결되지 않은 allocation이다. 면적은 실제 byte 비율이나 address layout이 아니다. 사용 중인 element뿐 아니라 여유 capacity도 allocation에 포함되며, 실행 코드와 file-backed mapping 등은 생략했다.
 
-그림에서 읽어야 할 차이는 세 가지다.
+### C++: 연결하면 allocation/deallocation이 metric을 갱신한다
 
-1. **추적 가능성은 공통이다.** C++도 Rust도 자신을 통과한 allocator 요청을 셀 수 있다. Allocator-aware container 안에 일반 `std::string`을 넣거나, Rust wrapper 안에서 별도의 `String`을 만들면 nested allocation은 선택한 budget 밖으로 나갈 수 있다.
-2. **실패 전달의 기본값이 다르다.** C++의 capped throwing allocator는 `std::bad_alloc`으로 task 경계까지 돌아올 수 있다. Rust는 명시적 `Result` 경로가 필요하며, 보통의 infallible allocation은 기본 `std` 구성에서 OOM abort로 이어진다.
-3. **두 숫자는 분리한다.** Requested allocation byte의 상한과 total RSS의 상한은 다르다. 각 process 하단의 stack·직접 `mmap`·다른 allocator뿐 아니라, 회색으로 표시한 allocator metadata와 retention도 별도로 고려한다.
+컴포넌트별 counter를 가진 allocator/resource를 연결하고 상위 cap을 공유하도록 구현하면, 그 경로의 allocation과 deallocation이 metric을 갱신한다. 호출부마다 예상 byte를 따로 더하고 빼지 않아도 된다. **한도 초과 시 throw하고 task 경계에서 catch하는 계약**까지 연결하면, estimate가 틀리거나 library 내부에서 예상 밖 growth가 발생해도 작업 단위로 실패를 처리할 수 있다.
 
-따라서 Rust에서 모든 메모리를 미리 정확히 예언해야 하는 것은 아니다. **초기 estimate는 실행 계획을 정하고, 다음 allocation의 크기가 확정되는 시점에 budget을 집행한다.** 이 책의 [정렬 buffer 실습](08-governance/18a-deterministic-reservation.md)은 `4 rows × 16 B = 64 B`에서 시작해 growth, rollback, 결과 소유권과 최종 반환까지 그 규칙을 코드로 따라간다.
+여기서 “자동”은 **allocator를 연결한 이후의 계측**을 말한다. `std::pmr::memory_resource` 자체가 counter나 cap을 제공하는 것은 아니다. 일반 `std::string`의 nested allocation, resource를 받지 않는 library, 별도 pool 등은 통제 밖에 남을 수 있다. Exception이 `noexcept` 경계를 통과하거나 cleanup이 exception-safe하지 않은 구성도 그림의 task 복구 전제에 해당하지 않는다. [C++ memory_resource 계약](https://eel.is/c++draft/mem.res.private)
 
-위 비교는 [C++ memory_resource 계약](https://eel.is/c++draft/mem.res.private), [Rust GlobalAlloc 계약](https://doc.rust-lang.org/std/alloc/trait.GlobalAlloc.html), [기본 allocation error 처리](https://doc.rust-lang.org/std/alloc/fn.handle_alloc_error.html)에 근거한다. 구체적인 reservation wrapper는 이 책의 설계 예시이며 Rust 언어 자체의 기능은 아니다.
+### Rust: allocator에서 보이는 것과 reservation에 잡히는 것은 다르다
+
+그림의 **Reserve는 application memory budget의 reservation**이다. `Vec::reserve`의 capacity 확보와 같은 개념이 아니다. 관리 대상 buffer는 grant를 얻고 fallible하게 grow하도록 구현하지만, 외부 crate가 내부에서 만드는 `Vec`, `String`은 그 grant를 알지 못한다. `Result`를 반환하는 API라는 이유만으로 내부 OOM도 `Err`로 돌아오는 것은 아니다.
+
+Rust에서도 계측용 `GlobalAlloc`을 구현하면 **실제로 자신을 통과한 allocation 요청의 합계**를 셀 수 있다. 다만 합계 관측, task별 charge, recoverable failure는 각각 다른 기능이다. Global cap이 null을 반환하더라도 이를 호출한 쪽이 infallible 경로라면, 기본 `std` 구성에서는 task error 대신 process abort로 이어진다. [GlobalAlloc 계약](https://doc.rust-lang.org/std/alloc/trait.GlobalAlloc.html), [기본 allocation error 처리](https://doc.rust-lang.org/std/alloc/fn.handle_alloc_error.html)
+
+따라서 “다음 allocation의 크기를 계산해 정확히 승인한다”는 규칙은 **그 규칙에 연결한 경로 안에서만** 성립한다. [정렬 buffer 실습](08-governance/18a-deterministic-reservation.md)은 이 통제 가능한 부분을 구현한다. 외부 crate가 섞인 실제 사례와 대응은 [혼합 allocation 경로](01-mental-model/00-why-admission.md#실제-library를-넣으면-드러나는-차이)에서 구분한다.
+
+### Headroom: 계측 밖의 비용을 위한 여유이지, 자동 방어선은 아니다
+
+하단 막대는 **예산 배분**이며 실제 memory mapping이나 현재 사용량이 아니다. 관리 예산을 먼저 정하고, 계측 밖 allocation, allocator 간접비용·retention, runtime·stack·native 비용 등에 쓸 별도 여유인 headroom을 둔다. Baseline과 여유의 세부 구분은 [예산 산식](01-mental-model/00-why-admission.md#admission이-실제로-보장하는-것)에서 다룬다. 그림의 두 막대에 같은 비율을 사용한 것은 비교를 위한 배치이며 권장 비율이 아니다.
+
+**C++도 headroom이 필요하다. Rust에서는 reservation에 연결되지 않은 외부 crate의 peak도 여기에 영향을 준다.** Headroom이 그 allocation을 자동으로 계측하거나 초과를 거절하지는 않는다. 따라서 입력 크기·동시 실행 수 제한과 실제 peak 관측이 함께 필요하며, 상한을 설명할 수 없는 경로는 library 교체나 별도 process 격리까지 검토해야 한다. Requested allocation byte, total RSS, cgroup consumption은 같은 숫자가 아니다.
 
 이 책은 다음 문장을 출발점으로 삼는다.
 
@@ -41,7 +51,7 @@ C++에서 capped allocator와 `std::bad_alloc`을 task boundary에 연결해 본
 
 > **Recoverable global OOM boundary가 없는 Rust server/DB에서, process를 죽이지 않고 workload를 어떻게 제한할 것인가?**
 
-답은 “초기 estimate를 완벽하게 맞힌다”가 아니다. 관리 대상 작업에 reservation을 부여하고, grow 전에 incremental grant를 얻도록 하여 commitment의 합을 제한한다. Total RSS에 포함되지만 이 accounting 밖에 있는 anonymous/native/kernel-facing memory는 별도 headroom과 cgroup으로 통제한다.
+답은 “초기 estimate를 완벽하게 맞힌다”가 아니다. 연결한 관리 대상 경로에서는 grow 전에 incremental grant를 얻도록 하여 commitment의 합을 제한한다. 연결하지 못한 경로에는 입력·concurrency 제한, headroom과 pressure 관측을 적용한다. Anonymous memory는 미추적 메모리의 동의어가 아니며, heap처럼 이미 계측한 부분도 포함한다. Total RSS와 cgroup consumption에는 application accounting 밖의 비용도 남으므로 최종 containment가 별도로 필요하다.
 
 이 차이는 [왜 allocation failure 대신 admission인가](01-mental-model/00-why-admission.md)에서 먼저 자세히 설명한다.
 
@@ -85,6 +95,8 @@ C/C++ 개발자는 RAII와 smart pointer라는 익숙한 발판을 이용하되,
 
 - safe Rust 프로그램이 leak이나 OOM을 일으키지 않는다는 주장
 - allocation 성공이 physical memory 확보를 뜻한다는 주장
+- 모든 외부 crate의 allocation이 application reservation에 자동 연결된다는 주장
+- headroom을 설정하면 계측 밖 allocation의 상한이 집행된다는 주장
 
 ### 출처와 권위
 

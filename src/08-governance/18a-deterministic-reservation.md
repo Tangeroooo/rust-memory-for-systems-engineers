@@ -25,6 +25,8 @@
 
 **“Requested byte에 대한 정확한 상한”과 “allocator가 확보한 모든 메모리의 상한”은 다르다.** 이번 장은 전자를 실제 allocation 경로에 연결한다. [Anonymous memory 실험](../06-os/14-virtual-memory-rss.md)은 후자의 관측값이 왜 달라지는지 보여준다.
 
+**이 실습은 전체 애플리케이션이 fallible하다고 가정하지 않는다.** 정확히 통제하는 대상은 위 표의 row storage뿐이다. 앞단에서 `serde_json`으로 별도 `Vec<String>`을 만들거나 뒤에서 결과를 `String`으로 변환하면, 그 allocation은 이 pool의 reserve 숫자에 자동 포함되지 않는다. 전체 시스템에서는 [외부 crate가 섞인 경로](../01-mental-model/00-why-admission.md#실제-library를-넣으면-드러나는-차이)를 별도로 분류하고 headroom·입력 제한·격리를 적용해야 한다.
+
 ## 2. Estimate를 어떻게 계산하는가
 
 입력의 예상 wire 길이가 64 byte라면 다음과 같다.

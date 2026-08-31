@@ -39,7 +39,9 @@ Rust 공식 사이트는 white background와 큰 display typography를 사용한
 
 - 기존에 추출한 project-local token을 그대로 재사용했다. 설치된 skill이나 전역 profile은 수정하지 않았다.
 - `diagram-design` 2.6.11, nested containment, `doc-wide` 1280×720, static HTML이다. 사용자의 요청에 따라 호출 흐름도에서 영역·포함 관계 중심으로 수정했다.
-- Process → allocator backing → 관리 대상 storage의 3단계 포함 관계를 좌우로 비교한다. 각 process의 task charge 면 두 곳에만 Rust red를 사용했다.
-- C++ capped allocator와 Rust의 **명시적 fallible wrapper**를 비교한다. Rust의 기본 infallible failure path는 footer에서 별도로 밝힌다.
-- Spare capacity, cap 밖 allocation/간접비용, allocator 바깥 stack·직접 mmap을 구획으로 표현했다. 실행 코드와 file-backed mapping 등은 생략하고 본문에서 이를 밝혔다. 면적은 실제 byte 비율이나 address layout을 의미하지 않는다.
+- C++은 전용 allocator에 연결한 자체 buffer와 외부 library를 하나의 cap 안에 넣고, Rust는 명시적인 reserve/charge 영역과 외부 crate의 infallible allocation 영역을 나눴다. Allocator 합계 관측과 task reservation 연결은 서로 다름을 표현한다.
+- C++의 allocation/deallocation 기반 자동 계측과 `bad_alloc` 복구, Rust의 fallible `Err`와 infallible 기본 OOM abort를 짧은 label로 대비했다. 전제와 실제 Boost.JSON·Serde 사례는 본문으로 옮겼다.
+- Rust red는 reservation 밖 crate 영역과 기본 OOM abort 두 초점에만 사용했다. 검은 경계는 명시적인 통제, 점선은 선택한 allocator/cap 밖 경로다.
+- 양쪽 하단에 관리 예산과 빗금 headroom을 분리한 예산 막대를 추가했다. Headroom은 물리적 메모리 종류나 자동 계측 영역이 아니며, 같은 비율은 비교용 배치일 뿐 권장값이 아님을 본문에 명시했다.
+- 실행 코드와 file-backed mapping 등은 생략했다. 면적은 실제 byte 비율이나 address layout을 의미하지 않으며, 회색을 allocator metadata/retention의 실측 면적으로 해석하지 않는다.
 - Source Code Pro는 code label, Fira Sans는 본문, Alfa Slab One은 영문 display에 사용했다. 한국어는 기존의 명시적 fallback을 유지한다.

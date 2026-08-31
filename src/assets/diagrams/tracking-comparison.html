@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>C++와 Rust의 메모리 영역·추적 범위</title>
+  <title>C++ allocator 통제와 Rust reservation의 경계</title>
   <link href="https://fonts.googleapis.com/css2?family=Alfa+Slab+One&amp;family=Fira+Sans:wght@400;500;600&amp;family=Source+Code+Pro:wght@400;500&amp;family=Noto+Sans+KR:wght@400;500;600&amp;display=swap" rel="stylesheet">
   <style>
     * { box-sizing: border-box; margin: 0; }
@@ -13,95 +13,94 @@
     svg { display: block; width: 100%; min-width: 960px; }
     text { fill: var(--ink); font-family: 'Fira Sans', 'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif; font-size: 16px; }
     .display { font-family: 'Alfa Slab One', 'Noto Sans KR', sans-serif; font-size: 28px; font-weight: 400; }
-    .heading { font-size: 20px; font-weight: 600; }
+    .heading { font-size: 24px; font-weight: 600; }
+    .label { font-size: 20px; font-weight: 500; }
     .small { font-size: 12px; fill: var(--muted); }
-    .code { font-family: 'Source Code Pro', monospace; font-size: 12px; }
+    .code { font-family: 'Source Code Pro', monospace; font-size: 16px; }
     .process { fill: #f5f5f2; stroke: #b8c0c3; stroke-width: 1; }
-    .heap { fill: #e8ebe8; stroke: #59656a; stroke-width: 1; }
-    .tracked { fill: #faedf0; stroke: var(--accent); stroke-width: 1.2; }
-    .other { fill: #dbe0dd; stroke: #b8c0c3; stroke-width: 1; }
-    .outside { fill: #fafaf7; stroke: #59656a; stroke-width: 1; stroke-dasharray: 4 4; }
+    .heap { fill: #e1e6e2; stroke: #b8c0c3; stroke-width: 1; }
+    .cap { fill: #fafaf7; stroke: var(--ink); stroke-width: 2; }
+    .storage { fill: #edf0ed; stroke: #b8c0c3; stroke-width: 1; }
+    .risk { fill: #faedf0; stroke: var(--accent); stroke-width: 1; }
+    .outside { fill: #f5f5f2; stroke: #b8c0c3; stroke-width: 1; stroke-dasharray: 4 4; }
   </style>
 </head>
 <body>
 <main>
 <svg viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="tracking-comparison-title tracking-comparison-desc">
-  <title id="tracking-comparison-title">C++와 Rust의 메모리 영역·추적 범위</title>
-  <desc id="tracking-comparison-desc">두 process의 allocator 영역 안에서 task가 charge하는 객체와 spare capacity를 강조하고, 그 cap에 포함되지 않은 allocation과 간접비용, allocator 바깥의 stack 및 직접 mmap 영역을 구분한 개념적 메모리 구성도다.</desc>
+  <title id="tracking-comparison-title">C++ allocator 통제와 Rust reservation의 경계</title>
+  <desc id="tracking-comparison-desc">왼쪽 C++ 구성에서는 자체 buffer와 연결된 외부 library가 전용 allocator의 cap 안에 있다. Allocate와 deallocate를 통해 컴포넌트별 metric을 갱신하고 한도 초과를 bad_alloc으로 전달한다. 오른쪽 Rust 혼합 구성에서는 자체 buffer만 명시적인 reservation과 charge에 연결되어 있다. 외부 crate의 Vec 및 String allocation도 global allocator에서 합계 계측은 가능하지만 task reservation에는 자동 반영되지 않으며, infallible 경로의 기본 OOM 동작은 process abort다. 양쪽 모두 선택한 allocator 밖의 stack, mmap, 다른 allocator 경로가 남는다. 하단은 실제 메모리 영역이 아닌 예산 배분으로, 관리 예산과 별도 여유인 headroom을 구분한다. 면적은 실제 byte 비율이 아니다.</desc>
   <defs>
-    <marker id="arrow" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto"><polygon points="0 0, 8 4, 0 8" fill="#59656a"/></marker>
-    <marker id="arrow-accent" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto"><polygon points="0 0, 8 4, 0 8" fill="#a72145"/></marker>
-    <marker id="arrow-link" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto"><polygon points="0 0, 8 4, 0 8" fill="#59656a"/></marker>
+    <pattern id="tracking-headroom" width="8" height="8" patternUnits="userSpaceOnUse">
+      <rect width="8" height="8" fill="#f5f5f2"/>
+      <path d="M -4 4 L 4 -4 M 0 8 L 8 0 M 4 12 L 12 4" fill="none" stroke="#b8c0c3" stroke-width="1"/>
+    </pattern>
   </defs>
   <rect width="1280" height="720" fill="#fafaf7"/>
-  <text x="40" y="48" class="display">Memory areas &amp; accounting</text>
-  <text x="40" y="80">메모리는 여러 영역에 걸쳐 존재한다. 강조한 면은 각 task의 cap이 직접 관리하는 requested byte다.</text>
+  <text x="40" y="48" class="display">Memory control</text>
+  <text x="40" y="80" class="label">같은 heap에서도, budget이 닿는 범위는 다르다.</text>
 
-  <!-- Containment, not a call graph: process > allocator backing > governed storage. -->
-  <rect class="process" x="40" y="112" width="576" height="424" rx="8"/>
-  <text x="64" y="144" class="heading">C++ process</text>
-  <text x="260" y="144" class="small">Task allocator에 연결한 구성</text>
-  <rect class="heap" x="64" y="176" width="528" height="240" rx="8"/>
-  <text x="88" y="204">선택한 allocator의 backing 영역</text>
-  <rect class="tracked" x="88" y="228" width="312" height="164" rx="8"/>
-  <text x="104" y="256" class="heading">Task allocator cap</text>
-  <text x="104" y="280" class="code">live requested bytes &lt;= cap</text>
-  <line x1="104" y1="296" x2="384" y2="296" stroke="#b8c0c3"/>
-  <line x1="244" y1="312" x2="244" y2="356" stroke="#b8c0c3"/>
-  <text x="104" y="328">객체 · payload</text>
-  <text x="104" y="352" class="small">사용 중인 storage</text>
-  <text x="260" y="328">여유 capacity</text>
-  <text x="260" y="352" class="small">비어 있어도 charge</text>
-  <text x="104" y="376" class="small">참여한 nested allocation도 포함</text>
-  <rect class="other" x="424" y="228" width="144" height="164" rx="8"/>
-  <text x="436" y="256">이 cap 밖</text>
-  <text x="436" y="284" class="small">다른 live allocation</text>
-  <text x="436" y="308" class="small">metadata / 단편화</text>
-  <text x="436" y="332" class="small">retained free block</text>
-  <text x="436" y="376" class="small">별도 추적 · headroom</text>
-  <rect class="outside" x="64" y="440" width="528" height="64" rx="8"/>
-  <text x="80" y="468">Thread stack · 직접 mmap · 다른 allocator의 FFI / pool</text>
-  <text x="80" y="488" class="small">선택한 allocator를 통과하지 않는 별도 영역</text>
+  <text x="64" y="132" class="heading">C++ · allocator-aware 구성</text>
+  <rect class="process" x="40" y="152" width="576" height="352" rx="8"/>
+  <rect class="heap" x="64" y="176" width="528" height="248" rx="8"/>
+  <text x="88" y="208" class="label">컴포넌트별 metric</text>
+  <!-- Participating components share a cap; their requests update counters. -->
+  <rect class="cap" x="88" y="232" width="480" height="168" rx="8"/>
+  <text x="104" y="264" class="label">전용 allocator · 자동 계측 + cap</text>
+  <rect class="storage" x="104" y="288" width="204" height="88" rx="8"/>
+  <text x="120" y="320" class="label">자체 buffer</text>
+  <text x="120" y="352" class="code">alloc / dealloc</text>
+  <rect class="storage" x="324" y="288" width="228" height="88" rx="8"/>
+  <text x="340" y="320" class="label">연결된 library</text>
+  <text x="340" y="352" class="code">alloc / dealloc</text>
+  <rect class="outside" x="64" y="444" width="528" height="40" rx="8"/>
+  <text x="80" y="472">통제 밖 · 미연결 library / stack / mmap</text>
 
-  <rect class="process" x="664" y="112" width="576" height="424" rx="8"/>
-  <text x="688" y="144" class="heading">Rust process</text>
-  <text x="884" y="144" class="small">명시적 fallible wrapper로 연결한 구성</text>
-  <rect class="heap" x="688" y="176" width="528" height="240" rx="8"/>
-  <text x="712" y="204">선택한 allocator의 backing 영역</text>
-  <rect class="tracked" x="712" y="228" width="312" height="164" rx="8"/>
-  <text x="728" y="256" class="heading">Task reservation / charge</text>
-  <text x="728" y="280" class="code">requested bytes &lt;= grant</text>
-  <line x1="728" y1="296" x2="1008" y2="296" stroke="#b8c0c3"/>
-  <line x1="868" y1="312" x2="868" y2="356" stroke="#b8c0c3"/>
-  <text x="728" y="328">초기화된 Row</text>
-  <text x="728" y="352" class="small">사용 중인 slot</text>
-  <text x="884" y="328">여유 capacity</text>
-  <text x="884" y="352" class="small">비어 있어도 charge</text>
-  <text x="728" y="376" class="small">추적 경로에 연결한 storage만 포함</text>
-  <rect class="other" x="1048" y="228" width="144" height="164" rx="8"/>
-  <text x="1060" y="256">이 cap 밖</text>
-  <text x="1060" y="284" class="small">미연결 allocation</text>
-  <text x="1060" y="308" class="small">metadata / 단편화</text>
-  <text x="1060" y="332" class="small">retained free block</text>
-  <text x="1060" y="376" class="small">별도 추적 · headroom</text>
-  <rect class="outside" x="688" y="440" width="528" height="64" rx="8"/>
-  <text x="704" y="468">Thread stack · 직접 mmap · 다른 allocator의 FFI / pool</text>
-  <text x="704" y="488" class="small">선택한 allocator를 통과하지 않는 별도 영역</text>
+  <text x="688" y="132" class="heading">Rust · fallible + infallible 혼합</text>
+  <rect class="process" x="664" y="152" width="576" height="352" rx="8"/>
+  <rect class="heap" x="688" y="176" width="528" height="248" rx="8"/>
+  <text x="712" y="208" class="label">GlobalAlloc에서 합계 계측 가능</text>
+  <!-- Observable globally does not mean charged to a task reservation. -->
+  <rect class="cap" x="712" y="232" width="216" height="168" rx="8"/>
+  <text x="728" y="264" class="label">Reserve · charge</text>
+  <rect class="storage" x="728" y="288" width="184" height="88" rx="8"/>
+  <text x="744" y="320" class="label">자체 buffer</text>
+  <text x="744" y="352" class="code">fallible grow</text>
+  <rect class="risk" x="952" y="232" width="240" height="168" rx="8"/>
+  <text x="968" y="264" class="label">Reserve 계측 밖</text>
+  <text x="968" y="320" class="label">외부 crate</text>
+  <text x="968" y="352" class="code">Vec / String</text>
 
-  <text x="64" y="568" class="heading">초과 시: bad_alloc → task에서 catch</text>
-  <text x="64" y="596" class="small">해당 allocation의 allocator 연결과 exception-safe cleanup이 전제다.</text>
-  <text x="688" y="568" class="heading">승인 거절 / null 시: Result::Err</text>
-  <text x="688" y="596" class="small">기본 infallible 경로는 이 복구 경계 밖이며 OOM 시 보통 abort한다.</text>
-  <text x="40" y="632">관측 축: allocator requested byte ≠ process RSS ≠ cgroup memory.current</text>
-  <text x="40" y="656" class="small">면적은 개념적 포함 관계이며 byte 비율이나 실제 address map이 아니다. Reservation은 별도 메모리 영역이 아니라 사용 권한이다.</text>
+  <rect class="outside" x="688" y="444" width="528" height="40" rx="8"/>
+  <text x="704" y="472">Allocator 밖 · stack / mmap / native</text>
 
-  <line x1="40" y1="676" x2="1240" y2="676" stroke="#b8c0c3"/>
-  <rect x="40" y="692" width="16" height="16" fill="#faedf0" stroke="#a72145"/>
-  <text x="68" y="704" class="small">강조: task가 charge하는 storage</text>
-  <rect x="384" y="692" width="16" height="16" fill="#dbe0dd" stroke="#b8c0c3"/>
-  <text x="412" y="704" class="small">회색: 해당 task cap 밖의 allocation·간접비용</text>
-  <rect x="824" y="692" width="16" height="16" fill="#fafaf7" stroke="#59656a" stroke-dasharray="4 4"/>
-  <text x="852" y="704" class="small">점선: 선택한 allocator 바깥</text>
+  <text x="64" y="536" class="small">CAP 초과 · ALLOCATION 실패</text>
+  <text x="64" y="568" class="heading">throw bad_alloc → task 복구</text>
+  <text x="728" y="536" class="small">명시적 FALLIBLE 경로</text>
+  <text x="728" y="568" class="heading">Err → task 복구</text>
+  <text x="968" y="536" class="small">INFALLIBLE OOM · 기본 std</text>
+  <text x="968" y="568" class="heading" style="fill:#a72145">process abort</text>
+
+  <!-- Budget planning is deliberately separate from memory containment. -->
+  <text x="64" y="608" class="small">예산 배분 · 실제 사용량 아님</text>
+  <rect x="64" y="620" width="352" height="36" fill="#e1e6e2" stroke="#2a3439"/>
+  <text x="240" y="644" text-anchor="middle">Allocator 관리 예산</text>
+  <rect x="416" y="620" width="176" height="36" fill="url(#tracking-headroom)" stroke="#b8c0c3"/>
+  <rect x="456" y="624" width="96" height="28" fill="#fafaf7"/>
+  <text x="504" y="644" text-anchor="middle">Headroom</text>
+  <text x="688" y="608" class="small">예산 배분 · 실제 사용량 아님</text>
+  <rect x="688" y="620" width="352" height="36" fill="#e1e6e2" stroke="#2a3439"/>
+  <text x="864" y="644" text-anchor="middle">Reservation 관리 예산</text>
+  <rect x="1040" y="620" width="176" height="36" fill="url(#tracking-headroom)" stroke="#b8c0c3"/>
+  <rect x="1080" y="624" width="96" height="28" fill="#fafaf7"/>
+  <text x="1128" y="644" text-anchor="middle">Headroom</text>
+
+  <rect x="64" y="688" width="16" height="16" fill="#fafaf7" stroke="#2a3439" stroke-width="2"/>
+  <text x="92" y="704">명시적으로 집행하는 경계</text>
+  <rect x="456" y="688" width="16" height="16" fill="#faedf0" stroke="#a72145"/>
+  <text x="484" y="704">계측 가능 ≠ reservation 연결</text>
+  <rect x="896" y="688" width="16" height="16" fill="url(#tracking-headroom)" stroke="#b8c0c3"/>
+  <text x="924" y="704">Headroom = 별도 여유 예산</text>
 </svg>
 </main>
 </body>
